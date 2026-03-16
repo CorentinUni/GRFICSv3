@@ -311,12 +311,42 @@
 
 <script>
   var unityInstance = null;
-  const toolPorts = { attacker: 6088, defender: 6080, caldera: 8888 };
 
-  function openToolPort(port) {
-    const proto = window.location.protocol;   // http: or https:
-    const host  = window.location.hostname;   // localhost or 192.168.1.3 or lab.example.com
-    window.open(`${proto}//${host}:${port}/`, "_blank", "noopener,noreferrer");
+  const toolEndpoints = {
+    "localhost": {
+      attacker: "http://localhost:6088/",
+      defender: "http://localhost:6080/",
+      caldera:  "http://localhost:8888/"
+    },
+    "127.0.0.1": {
+      attacker: "http://127.0.0.1:6088/",
+      defender: "http://127.0.0.1:6080/",
+      caldera:  "http://127.0.0.1:8888/"
+    },
+    "192.168.95.45": {
+      attacker: "http://192.168.90.6:6088/",
+      defender: "http://192.168.95.5:6080/",
+      caldera:  "http://192.168.90.250:8888/"
+    }
+  };
+
+  function openTool(name) {
+    const host = window.location.hostname;
+    const endpoints = toolEndpoints[host] || toolEndpoints["localhost"];
+    const url = endpoints[name];
+
+    if (!url) {
+      alert(`No URL configured for ${name} on host ${host}`);
+      return;
+    }
+
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  function getToolUrl(name) {
+    const host = window.location.hostname;
+    const endpoints = toolEndpoints[host] || toolEndpoints["localhost"];
+    return endpoints[name] || null;
   }
 
   function setStatus(text, color) {
@@ -359,13 +389,21 @@
     }
   }
 
-  async function checkPort(port) {
-    const url = `${location.protocol}//${location.hostname}:${port}/`;
+  async function checkTool(name) {
+    const url = getToolUrl(name);
+    if (!url) {
+      return false;
+    }
+
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 900);
 
-      await fetch(url, { mode: "no-cors", cache: "no-store", signal: ctrl.signal });
+      await fetch(url, {
+        mode: "no-cors",
+        cache: "no-store",
+        signal: ctrl.signal
+      });
 
       clearTimeout(t);
       return true;
@@ -404,9 +442,9 @@
 
   async function pollOnce() {
     const [attOk, defOk, calOk] = await Promise.all([
-      checkPort(toolPorts.attacker),
-      checkPort(toolPorts.defender),
-      checkPort(toolPorts.caldera),
+      checkTool("attacker"),
+      checkTool("defender"),
+      checkTool("caldera"),
     ]);
 
     applyStabilizedResult("attacker", attOk);
@@ -501,7 +539,7 @@ const SIM_POLL_MS = 3000;
 
         <div class="section-title">Connect</div>
 
-        <button class="btn" onclick="openToolPort(6088)">
+        <button class="btn" onclick="openTool('attacker')">
           <div class="icon">🟥</div>
           <div class="meta">
             <div class="label">Attacker Workstation</div>
@@ -514,7 +552,7 @@ const SIM_POLL_MS = 3000;
           </div>
         </button>
 
-        <button class="btn" onclick="openToolPort(6080)">
+        <button class="btn" onclick="openTool('defender')">
           <div class="icon">🟦</div>
           <div class="meta">
             <div class="label">Defender Workstation</div>
@@ -527,7 +565,7 @@ const SIM_POLL_MS = 3000;
           </div>
         </button>
 
-        <button class="btn" onclick="openToolPort(8888)">
+        <button class="btn" onclick="openTool('caldera')">
           <div class="icon">🌋</div>
           <div class="meta">
             <div class="label">Caldera</div>
@@ -560,8 +598,8 @@ const SIM_POLL_MS = 3000;
         <div class="topbar">
           <div class="title">Chemical Plant Simulation</div>
           <div class="actions">
-            <button class="small-btn" onclick="openToolPort(6088)">Attacker</button>
-            <button class="small-btn" onclick="openToolPort(6080)">Defender</button>
+            <button class="small-btn" onclick="openTool('attacker')">Attacker</button>
+            <button class="small-btn" onclick="openTool('defender')">Defender</button>
             <button class="small-btn" onclick="unityInstance && unityInstance.SetFullscreen(1)">Fullscreen</button>
           </div>
         </div>
@@ -572,18 +610,5 @@ const SIM_POLL_MS = 3000;
       </main>
     </div>
 
-    <script>
-      // Fill in the displayed URLs using current hostname (so no "localhost" hardcoding).
-      (function () {
-        const proto = window.location.protocol;
-        const host  = window.location.hostname;
-        const attacker = `${proto}//${host}:6088/`;
-        const defender = `${proto}//${host}:6080/`;
-        const aEl = document.getElementById("attackerUrlText");
-        const dEl = document.getElementById("defenderUrlText");
-        if (aEl) aEl.textContent = attacker;
-        if (dEl) dEl.textContent = defender;
-      })();
-    </script>
   </body>
 </html>

@@ -18,7 +18,7 @@ services:
     networks:
       a-grfics-admin:  # gets random bridge IP (e.g., 172.18.x.x)
       b-ics-net:
-        ipv4_address: 192.168.95.10
+        ipv4_address: 192.168.95.45
 
     # Optional if you want to override default CMD
     # command: sh -c "./simulation/simulation & cd modbus && ./run_all.sh"
