@@ -23,7 +23,7 @@ RUN apt-get update && \
 
 # Add user
 RUN useradd -m -s /bin/bash ${USERNAME} && \
-    echo "${USERNAME}:plc123" | chpasswd && \
+    echo "${USERNAME}:zxcvbnm" | chpasswd && \
     usermod -aG sudo ${USERNAME}
 
 # Install noVNC + websockify
