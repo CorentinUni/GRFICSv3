@@ -1,0 +1,291 @@
+# ============================================================
+# GRFICS v3 — Lab Cybersécurité OT  |  IEC 62443
+# ============================================================
+# Architecture :
+#   Zone ICS  (b-ics-net  192.168.95.0/24) :
+#       simulation, plc, ews, iot-sensor, opcua-server
+#   Zone DMZ  (c-dmz-net  192.168.90.0/24) :
+#       hmi, kali, caldera, mqtt-broker, vuln-server
+#   Admin      (a-grfics-admin — bridge)   :
+#       tous les conteneurs (gestion)
+#
+# VULNERABILITES DOCUMENTEES IEC 62443 :
+#   SR 5.2 — Flux non filtré IoT sensor (ICS) → MQTT broker (DMZ)
+#            Le routeur laisse passer ce flux sans inspection.
+#            Vecteur : injection de valeurs via MQTT depuis DMZ.
+#   SR 1.1 — Authentification absente sur MQTT, Modbus, Telnet, FTP
+#   SR 3.1 — Communications non chiffrées sur tous les protocoles OT
+#   SR 6.1 — Absence de journalisation centralisée
+#
+# DEPLOIEMENT ETUDIANT :
+#   Prérequis : Docker Desktop >= 4.x, 16 Go RAM recommandés
+#   Démarrage : docker-compose up -d
+#   Arrêt     : docker-compose down
+#   Reset     : docker-compose down -v
+#
+#   ATTENTION CONFLIT RESEAU :
+#   Les sous-réseaux 192.168.95.0/24 et 192.168.90.0/24 sont fixes.
+#   Si votre réseau local utilise ces plages, modifiez les subnets
+#   dans la section networks et les ipv4_address correspondantes.
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # COMPOSANTS GRFICS v3 D'ORIGINE
+  # ----------------------------------------------------------
+
+  simulation:
+    image: fortiphyd/grfics-simulation
+    container_name: simulation
+    hostname: simulation
+    build: ./simulation
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "80:80"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "55555"]
+      interval: 5s
+      retries: 5
+    networks:
+      a-grfics-admin:
+      b-ics-net:
+        ipv4_address: 192.168.95.45
+    restart: unless-stopped
+
+  plc:
+    image: fortiphyd/grfics-plc
+    container_name: plc
+    hostname: plc
+    build: ./plc
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "502:502"     # Modbus TCP — non chiffré, sans auth (SR 1.1 / SR 3.1)
+      - "8080:8080"
+    depends_on:
+      simulation:
+        condition: service_healthy
+    networks:
+      a-grfics-admin:
+      b-ics-net:
+        ipv4_address: 192.168.95.2
+    volumes:
+      - plc_volume:/docker_persistent
+    restart: unless-stopped
+
+  ews:
+    image: fortiphyd/grfics-workstation
+    container_name: EWS
+    hostname: EWS
+    build: ./workstation
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "6080:6080"
+    networks:
+      a-grfics-admin:
+      b-ics-net:
+        ipv4_address: 192.168.95.5
+    restart: unless-stopped
+
+  hmi:
+    image: fortiphyd/grfics-scadalts
+    container_name: HMI
+    build: ./scadalts
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "6081:8080"
+    depends_on:
+      router:
+        condition: service_healthy
+    networks:
+      a-grfics-admin:
+      c-dmz-net:
+        ipv4_address: 192.168.90.107
+    volumes:
+      - scadalts_db:/var/lib/mysql
+    restart: unless-stopped
+
+  kali:
+    image: fortiphyd/grfics-attacker
+    container_name: kali
+    hostname: kali
+    build: ./attacker
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "6088:6080"
+    networks:
+      a-grfics-admin:
+      c-dmz-net:
+        ipv4_address: 192.168.90.6
+    sysctls:
+      net.ipv4.conf.default.arp_announce: 2
+      net.ipv4.conf.all.arp_announce: 2
+    restart: unless-stopped
+
+  router:
+    image: fortiphyd/grfics-router
+    container_name: router
+    hostname: router
+    build: ./router
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-c", "ip route | grep -q 192.168.95.0 || exit 1"]
+      interval: 5s
+      retries: 5
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    sysctls:
+      net.ipv4.ip_forward: '1'
+    environment:
+      - FWUI_SECRET_KEY=some-long-secret-you-generate
+    volumes:
+      - router_config:/etc/firewall
+    networks:
+      a-grfics-admin:
+      b-ics-net:
+        ipv4_address: 192.168.95.200
+      c-dmz-net:
+        ipv4_address: 192.168.90.200
+    # NOTE SR 5.2 : le routeur ne filtre pas le flux
+    # iot-sensor (192.168.95.20) → mqtt-broker (192.168.90.50).
+    # Ce flux inter-zones sans inspection est une vulnérabilité
+    # intentionnelle documentée pour les exercices.
+
+  caldera:
+    image: fortiphyd/grfics-caldera
+    container_name: caldera
+    hostname: caldera
+    build: ./caldera
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    networks:
+      a-grfics-admin:
+      c-dmz-net:
+        ipv4_address: 192.168.90.250
+
+  # ----------------------------------------------------------
+  # AJOUTS PEDAGOGIQUES
+  # ----------------------------------------------------------
+
+  # --- MQTT Broker (Mosquitto sans authentification) ---
+  # Vulnérabilités intentionnelles :
+  #   SR 1.1 : anonymous access activé
+  #   SR 3.1 : pas de TLS, trafic en clair
+  #   SR 3.3 : pas de validation des données publiées
+  # Fichier durci disponible : mosquitto/mosquitto_hardened.conf
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0
+    container_name: mqtt-broker
+    hostname: mqtt-broker
+    ports:
+      - "1883:1883"    # MQTT non chiffré — volontairement exposé
+      - "9001:9001"    # WebSocket (observation depuis navigateur)
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      a-grfics-admin:
+      c-dmz-net:
+        ipv4_address: 192.168.90.50
+    restart: unless-stopped
+
+  # --- Capteur IoT simulé ---
+  # Publie température/pression depuis la zone ICS vers le broker DMZ.
+  # Vulnérabilité SR 5.2 : flux inter-zones sans authentification.
+  # Le payload expose volontairement plc_ip et auth:none.
+  iot-sensor:
+    build: ./iot-sensor          # image dédiée avec paho-mqtt inclus
+    container_name: iot-sensor
+    hostname: iot-sensor
+    volumes:
+      - ./iot-sensor/sensor.py:/sensor/sensor.py:ro
+    networks:
+      a-grfics-admin:
+      b-ics-net:
+        ipv4_address: 192.168.95.20
+    depends_on:
+      - mqtt-broker
+    restart: unless-stopped
+
+  # --- Serveur vulnérable (SSH + Telnet + FTP + HTTP) ---
+  # Kill chain documentée :
+  #   FTP anonymous → network_config.txt (credentials SSH)
+  #   → SSH bruteforce → sudo misconfiguration → escalade
+  #   → logs SCADA avec credentials → dump SQL via HTTP
+  vuln-server:
+    build: ./vuln-server
+    container_name: vuln-server
+    hostname: vuln-server
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "2222:22"      # SSH  — mdp faible, PermitRootLogin yes
+      - "2323:23"      # Telnet — clair, pas d'auth forte
+      - "2121:21"      # FTP  — anonymous autorisé
+      - "8181:80"      # HTTP — admin sans HTTPS, directory listing
+    networks:
+      a-grfics-admin:
+      c-dmz-net:
+        ipv4_address: 192.168.90.30
+    restart: unless-stopped
+
+  # --- Serveur OPC-UA (sans sécurité) ---
+  # Simule un serveur OPC-UA industriel en mode None (pas d'auth,
+  # pas de chiffrement). Expose des nœuds représentant le process.
+  # Vulnérabilités intentionnelles :
+  #   SR 1.1 : SecurityMode = None
+  #   SR 3.1 : pas de chiffrement des échanges
+  # Surface de test chemin 1 : sonde OPC-UA compliance tool.
+  opcua-server:
+    build: ./opcua-server
+    container_name: opcua-server
+    hostname: opcua-server
+    ports:
+      - "4840:4840"    # OPC-UA TCP — non sécurisé
+    networks:
+      a-grfics-admin:
+      b-ics-net:
+        ipv4_address: 192.168.95.30
+    depends_on:
+      simulation:
+        condition: service_healthy
+    restart: unless-stopped
+
+# ----------------------------------------------------------
+# RÉSEAUX
+# ----------------------------------------------------------
+networks:
+  b-ics-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.95.0/24
+
+  c-dmz-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.90.0/24
+
+  a-grfics-admin:
+    driver: bridge
+
+# ----------------------------------------------------------
+# VOLUMES
+# ----------------------------------------------------------
+volumes:
+  scadalts_db:
+    name: scadalts_db
+  plc_volume:
+    name: plc_volume
+  router_config:
+    name: router_config
