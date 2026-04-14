@@ -1,0 +1,199 @@
+{
+  "lab": "GRFICSv3 — Cybersécurité OT IEC 62443",
+  "version": "3.0-enrichi",
+  "generated": "2026-03-01",
+  "zones": [
+    {
+      "id": "ICS",
+      "name": "Zone ICS",
+      "subnet": "192.168.95.0/24",
+      "security_level_target": "SL-T 2",
+      "description": "Réseau de contrôle industriel — équipements de terrain et automates",
+      "assets": [
+        {
+          "id": "simulation",
+          "name": "Simulation Process Chimique",
+          "ip": "192.168.95.45",
+          "type": "simulation",
+          "protocols": ["HTTP"],
+          "ports": [{"port": 80, "service": "HTTP", "tls": false}],
+          "auth": "none",
+          "vulnerabilities_intentionnelles": []
+        },
+        {
+          "id": "plc",
+          "name": "PLC — Automate Modbus",
+          "ip": "192.168.95.2",
+          "type": "plc",
+          "protocols": ["Modbus/TCP"],
+          "ports": [
+            {"port": 502,  "service": "Modbus TCP", "tls": false, "auth": "none"},
+            {"port": 8080, "service": "HTTP admin",  "tls": false, "auth": "none"}
+          ],
+          "auth": "none",
+          "vulnerabilities_intentionnelles": [
+            {"iec62443_sr": "SR 1.1", "description": "Modbus sans authentification"},
+            {"iec62443_sr": "SR 3.1", "description": "Modbus en clair, pas de TLS"}
+          ]
+        },
+        {
+          "id": "ews",
+          "name": "Engineering Workstation",
+          "ip": "192.168.95.5",
+          "type": "workstation",
+          "protocols": ["VNC"],
+          "ports": [{"port": 6080, "service": "noVNC", "tls": false}],
+          "auth": "none",
+          "vulnerabilities_intentionnelles": []
+        },
+        {
+          "id": "iot-sensor",
+          "name": "Capteur IoT Simulé",
+          "ip": "192.168.95.20",
+          "type": "iot_sensor",
+          "protocols": ["MQTT"],
+          "ports": [{"port": 1883, "service": "MQTT publish", "tls": false}],
+          "auth": "none",
+          "topics_publies": [
+            "ics/sensor/temperature",
+            "ics/sensor/pressure",
+            "ics/sensor/status",
+            "ics/sensor/raw_modbus",
+            "ics/alerts"
+          ],
+          "topics_souscrits": ["ics/plc/commands"],
+          "vulnerabilities_intentionnelles": [
+            {"iec62443_sr": "SR 5.2", "description": "Flux inter-zones ICS→DMZ non filtré"},
+            {"iec62443_sr": "SR 1.1", "description": "Publication MQTT sans authentification"},
+            {"iec62443_sr": "SR 3.3", "description": "Exposition IP PLC et auth:none dans payload"}
+          ]
+        },
+        {
+          "id": "opcua-server",
+          "name": "Serveur OPC-UA",
+          "ip": "192.168.95.30",
+          "type": "opcua_server",
+          "protocols": ["OPC-UA/TCP"],
+          "ports": [{"port": 4840, "service": "OPC-UA", "tls": false, "security_mode": "None"}],
+          "auth": "anonymous",
+          "nodes_exposes": [
+            "ns=2;s=Temperature",
+            "ns=2;s=Pressure",
+            "ns=2;s=Status",
+            "ns=2;s=PLCAddress",
+            "ns=2;s=FirmwareVer"
+          ],
+          "vulnerabilities_intentionnelles": [
+            {"iec62443_sr": "SR 1.1", "description": "SecurityMode None, connexion anonyme"},
+            {"iec62443_sr": "SR 3.1", "description": "Pas de chiffrement OPC-UA"},
+            {"iec62443_sr": "SR 3.3", "description": "PLCAddress exposé sans contrôle d'accès"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "DMZ",
+      "name": "Zone DMZ",
+      "subnet": "192.168.90.0/24",
+      "security_level_target": "SL-T 1",
+      "description": "Zone démilitarisée — supervision et accès opérateurs",
+      "assets": [
+        {
+          "id": "hmi",
+          "name": "HMI ScadaLTS",
+          "ip": "192.168.90.107",
+          "type": "hmi",
+          "protocols": ["HTTP"],
+          "ports": [{"port": 8080, "service": "ScadaLTS HTTP", "tls": false}],
+          "auth": "basic",
+          "vulnerabilities_intentionnelles": []
+        },
+        {
+          "id": "mqtt-broker",
+          "name": "MQTT Broker Mosquitto",
+          "ip": "192.168.90.50",
+          "type": "broker",
+          "protocols": ["MQTT", "WebSocket"],
+          "ports": [
+            {"port": 1883, "service": "MQTT",      "tls": false, "auth": "none"},
+            {"port": 9001, "service": "MQTT/WS",   "tls": false, "auth": "none"}
+          ],
+          "auth": "none",
+          "vulnerabilities_intentionnelles": [
+            {"iec62443_sr": "SR 1.1", "description": "allow_anonymous true"},
+            {"iec62443_sr": "SR 3.1", "description": "Pas de TLS sur port 1883/9001"},
+            {"iec62443_sr": "SR 3.3", "description": "Aucune ACL sur les topics"}
+          ]
+        },
+        {
+          "id": "vuln-server",
+          "name": "Serveur Vulnérable",
+          "ip": "192.168.90.30",
+          "type": "server",
+          "protocols": ["SSH", "Telnet", "FTP", "HTTP"],
+          "ports": [
+            {"port": 22, "service": "SSH",    "tls": true,  "auth": "password_weak"},
+            {"port": 23, "service": "Telnet", "tls": false, "auth": "none"},
+            {"port": 21, "service": "FTP",    "tls": false, "auth": "anonymous"},
+            {"port": 80, "service": "HTTP",   "tls": false, "auth": "default_creds"}
+          ],
+          "kill_chain": [
+            "FTP anonymous → /public/network_config.txt (credentials SSH)",
+            "SSH operator:password123 → accès shell",
+            "sudo python3 NOPASSWD → escalade privilèges",
+            "/var/log/scada/system.log → credentials HMI en clair",
+            "HTTP /backup/db_dump.sql → dump SQL avec passwords"
+          ],
+          "vulnerabilities_intentionnelles": [
+            {"iec62443_sr": "SR 1.1", "description": "FTP anonymous, SSH mdp faibles, HTTP default creds"},
+            {"iec62443_sr": "SR 2.1", "description": "sudo misconfiguration NOPASSWD"},
+            {"iec62443_sr": "SR 3.1", "description": "Telnet et FTP en clair"},
+            {"iec62443_sr": "SR 6.1", "description": "Credentials en clair dans les logs"}
+          ]
+        },
+        {
+          "id": "kali",
+          "name": "Kali Linux Attacker",
+          "ip": "192.168.90.6",
+          "type": "attacker_vm",
+          "protocols": [],
+          "ports": [{"port": 6080, "service": "noVNC Kali", "tls": false}],
+          "auth": "none",
+          "vulnerabilities_intentionnelles": []
+        },
+        {
+          "id": "caldera",
+          "name": "Caldera C2",
+          "ip": "192.168.90.250",
+          "type": "c2_framework",
+          "protocols": ["HTTP"],
+          "ports": [{"port": 8888, "service": "Caldera UI", "tls": false}],
+          "auth": "basic",
+          "vulnerabilities_intentionnelles": []
+        }
+      ]
+    }
+  ],
+  "conduits": [
+    {
+      "id": "C1",
+      "name": "ICS → DMZ (MQTT sensor)",
+      "from": "iot-sensor (192.168.95.20)",
+      "to":   "mqtt-broker (192.168.90.50)",
+      "protocol": "MQTT/TCP 1883",
+      "filtered": false,
+      "encrypted": false,
+      "iec62443_violation": "SR 5.2 — Zone boundary protection absent"
+    },
+    {
+      "id": "C2",
+      "name": "DMZ → ICS (Modbus HMI→PLC)",
+      "from": "hmi (192.168.90.107)",
+      "to":   "plc (192.168.95.2)",
+      "protocol": "Modbus/TCP 502",
+      "filtered": false,
+      "encrypted": false,
+      "iec62443_violation": "SR 5.2 — Zone boundary protection absent"
+    }
+  ]
+}

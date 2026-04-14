@@ -1,0 +1,29 @@
+# Registre d'assets — GRFICSv3 Lab IEC 62443
+# À compléter pendant le tronc commun Jour 1 (cartographie réseau)
+# Outil : nmap, netdiscover, Wireshark
+#
+# Colonnes :
+#   asset_id         : identifiant unique de l'équipement
+#   hostname         : nom résolu ou estimé
+#   ip               : adresse IP découverte
+#   zone             : ICS | DMZ | Admin
+#   type             : PLC | HMI | Sensor | Server | Broker | Router | Attacker
+#   ports_ouverts    : liste des ports détectés (ex: 22/SSH, 1883/MQTT)
+#   protocoles       : protocoles identifiés
+#   auth_detectee    : yes | no | unknown
+#   tls_detecte      : yes | no | unknown
+#   observations     : notes libres (bannières, versions, anomalies Wireshark)
+#   criticite        : Critical | High | Medium | Low (à évaluer)
+
+asset_id,hostname,ip,zone,type,ports_ouverts,protocoles,auth_detectee,tls_detecte,observations,criticite
+plc,,,ICS,PLC,,,,,, 
+simulation,,,ICS,Simulation,,,,,,
+ews,,,ICS,Workstation,,,,,,
+iot-sensor,,,ICS,Sensor,,,,,,
+opcua-server,,,ICS,OPC-UA Server,,,,,,
+hmi,,,DMZ,HMI,,,,,,
+mqtt-broker,,,DMZ,Broker,,,,,,
+vuln-server,,,DMZ,Server,,,,,,
+kali,,,DMZ,Attacker,,,,,,
+caldera,,,DMZ,C2,,,,,,
+router,,,ICS+DMZ,Router,,,,,,
