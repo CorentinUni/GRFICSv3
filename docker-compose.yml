@@ -64,6 +64,9 @@ services:
     ports:
       - "502:502"     # Modbus TCP — non chiffré, sans auth (SR 1.1 / SR 3.1)
       - "8080:8080"
+    sysctls:
+      net.ipv4.conf.all.rp_filter: 0
+      net.ipv4.conf.default.rp_filter: 0
     depends_on:
       simulation:
         condition: service_healthy
@@ -251,6 +254,9 @@ services:
     hostname: opcua-server
     ports:
       - "4840:4840"    # OPC-UA TCP — non sécurisé
+    sysctls:
+      net.ipv4.conf.all.rp_filter: 0
+      net.ipv4.conf.default.rp_filter: 0
     networks:
       a-grfics-admin:
       b-ics-net:
